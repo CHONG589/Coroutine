@@ -7,8 +7,8 @@
  * @copyright Copyright (c) 2019年 sylar.yin All rights reserved (www.sylar.top)
  */
 
-#ifndef __SYLAR_HOOK_H__
-#define __SYLAR_HOOK_H__
+#ifndef __HOOK_H__
+#define __HOOK_H__
 
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -18,16 +18,15 @@
 #include <time.h>
 #include <unistd.h>
 
-namespace sylar {
-    /**
-     * @brief 当前线程是否hook
-     */
-    bool is_hook_enable();
-    /**
-     * @brief 设置当前线程的hook状态
-     */
-    void set_hook_enable(bool flag);
-}
+/**
+ * @brief 当前线程是否hook
+ */
+static bool is_hook_enable(); 
+
+/**
+ * @brief 设置当前线程的hook状态
+ */
+static void set_hook_enable(bool flag);
 
 extern "C" {
 

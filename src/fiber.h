@@ -1,11 +1,3 @@
-/**
- * @file fiber.h
- * @brief 协程模块
- * @details 基于ucontext_t实现，非对称协程
- * @version 0.1
- * @date 2021-06-15
- */
-
 // 对于 ucontext 四个 API 函数使用：
 // https://blog.csdn.net/qq_62821433/article/details/139480927?ops_
 // request_misc=%257B%2522request%255Fid%2522%253A%252282AB315A-6575
@@ -15,15 +7,13 @@
 // ~all~top_positive~default-1-139480927-null-null.142%5Ev100%5Econtro
 // l&utm_term=%E5%8D%8F%E7%A8%8B&spm=1018.2226.3001.4187
 
-#ifndef __SYLAR_FIBER_H__
-#define __SYLAR_FIBER_H__
+#ifndef __FIBER_H__
+#define __FIBER_H__
 
 #include <functional>
 #include <memory>
 #include <ucontext.h>
 #include "thread.h"
-
-namespace sylar {
 
 /**
  * @brief 协程类
@@ -145,7 +135,5 @@ private:
     /// 本协程是否参与调度器调度
     bool m_runInScheduler;
 };
-
-} // namespace sylar
 
 #endif

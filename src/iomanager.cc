@@ -6,13 +6,12 @@
  */
 
 #include <unistd.h>    // for pipe()
+#include <assert.h>
 #include <sys/epoll.h> // for epoll_xxx()
 #include <fcntl.h>     // for fcntl()
 #include "iomanager.h"
-#include "log.h"
+#include "../log/log.h"
 #include "macro.h"
-
-namespace sylar {
 
 enum EpollCtlOp {
 };
@@ -68,7 +67,8 @@ IOManager::FdContext::EventContext &IOManager::FdContext::getEventContext(IOMana
     case IOManager::WRITE:
         return write;
     default:
-        SYLAR_ASSERT2(false, "getContext");
+        LOG_ERROR("%s", "IOManager::getEventContext event False");
+        assert(false);
     }
     throw std::invalid_argument("getContext invalid event");
 }
@@ -81,7 +81,7 @@ void IOManager::FdContext::resetEventContext(EventContext &ctx) {
 
 void IOManager::FdContext::triggerEvent(IOManager::Event event) {
     // 待触发的事件必须已被注册过
-    SYLAR_ASSERT(events & event);
+    assert(events & event);
     /**
      *  清除该事件，表示不再关注该事件了
      * 也就是说，注册的IO事件是一次性的，如果想持续关注某个socket fd
@@ -102,10 +102,10 @@ void IOManager::FdContext::triggerEvent(IOManager::Event event) {
 IOManager::IOManager(size_t threads, bool use_caller, const std::string &name)
     : Scheduler(threads, use_caller, name) {
     m_epfd = epoll_create(5000);
-    SYLAR_ASSERT(m_epfd > 0);
+    assert(m_epfd > 0);
 
     int rt = pipe(m_tickleFds);
-    SYLAR_ASSERT(!rt);
+    assert(!rt);
 
     // 关注pipe读句柄的可读事件，用于tickle协程
     epoll_event event;
@@ -116,10 +116,10 @@ IOManager::IOManager(size_t threads, bool use_caller, const std::string &name)
 
     // 非阻塞方式，配合边缘触发
     rt = fcntl(m_tickleFds[0], F_SETFL, O_NONBLOCK);
-    SYLAR_ASSERT(!rt);
+    assert(!rt);
 
     rt = epoll_ctl(m_epfd, EPOLL_CTL_ADD, m_tickleFds[0], &event);
-    SYLAR_ASSERT(!rt);
+    assert(!rt);
 
     // 因为 m_fdContexts 是一个 vector，里面保存的是指针形式，所以这里
     // 初始化时要分配空间给它们（确定大小后）。
@@ -172,11 +172,9 @@ int IOManager::addEvent(int fd, Event event, std::function<void()> cb) {
 
     // 同一个fd不允许重复添加相同的事件
     FdContext::MutexType::Lock lock2(fd_ctx->mutex);
-    if (SYLAR_UNLIKELY(fd_ctx->events & event)) {
-        SYLAR_LOG_ERROR(g_logger) << "addEvent assert fd=" << fd
-                                  << " event=" << (EPOLL_EVENTS)event
-                                  << " fd_ctx.event=" << (EPOLL_EVENTS)fd_ctx->events;
-        SYLAR_ASSERT(!(fd_ctx->events & event));
+    if (fd_ctx->events & event) {
+        LOG_ERROR("IOManager::addEvent same event added, event=%d, fd_ctx.events=%d", (EPOLL_EVENTS)event, (EPOLL_EVENTS)fd_ctx->events);
+        assert(!(fd_ctx->events & event));
     }
 
     // 将新的事件加入epoll_wait，使用epoll_event的私有指针存储FdContext的位置
@@ -189,10 +187,7 @@ int IOManager::addEvent(int fd, Event event, std::function<void()> cb) {
 
     int rt = epoll_ctl(m_epfd, op, fd, &epevent);
     if (rt) {
-        SYLAR_LOG_ERROR(g_logger) << "epoll_ctl(" << m_epfd << ", "
-                                  << (EpollCtlOp)op << ", " << fd << ", " << (EPOLL_EVENTS)epevent.events << "):"
-                                  << rt << " (" << errno << ") (" << strerror(errno) << ") fd_ctx->events="
-                                  << (EPOLL_EVENTS)fd_ctx->events;
+        LOG_ERROR("IOManager::addEvent epoll_ctl add event False, fd=%d", fd);
         return -1;
     }
 
@@ -205,7 +200,7 @@ int IOManager::addEvent(int fd, Event event, std::function<void()> cb) {
     // 找到这个fd的event事件对应的EventContext，对其中的scheduler, cb, fiber进行赋值
     fd_ctx->events                     = (Event)(fd_ctx->events | event);
     FdContext::EventContext &event_ctx = fd_ctx->getEventContext(event);
-    SYLAR_ASSERT(!event_ctx.scheduler && !event_ctx.fiber && !event_ctx.cb);
+    assert(!event_ctx.scheduler && !event_ctx.fiber && !event_ctx.cb);
 
     // event_ctx为事件event的上下文，里面包括了执行函数等信息。下面是为它的上下文
     // 赋值。
@@ -215,7 +210,7 @@ int IOManager::addEvent(int fd, Event event, std::function<void()> cb) {
         event_ctx.cb.swap(cb);
     } else {
         event_ctx.fiber = Fiber::GetThis();
-        SYLAR_ASSERT2(event_ctx.fiber->getState() == Fiber::RUNNING, "state=" << event_ctx.fiber->getState());
+        assert(event_ctx.fiber->getState() == Fiber::RUNNING, "state=" << event_ctx.fiber->getState());
     }
     return 0;
 }
@@ -230,7 +225,8 @@ bool IOManager::delEvent(int fd, Event event) {
     lock.unlock();
 
     FdContext::MutexType::Lock lock2(fd_ctx->mutex);
-    if (SYLAR_UNLIKELY(!(fd_ctx->events & event))) {
+    if (!(fd_ctx->events & event)) {
+        fd_ctx->mutex.unlock();
         return false;
     }
 
@@ -243,9 +239,7 @@ bool IOManager::delEvent(int fd, Event event) {
 
     int rt = epoll_ctl(m_epfd, op, fd, &epevent);
     if (rt) {
-        SYLAR_LOG_ERROR(g_logger) << "epoll_ctl(" << m_epfd << ", "
-                                  << (EpollCtlOp)op << ", " << fd << ", " << (EPOLL_EVENTS)epevent.events << "):"
-                                  << rt << " (" << errno << ") (" << strerror(errno) << ")";
+        LOG_ERROR("IOManager::delEvent false, fd=%d, event=%d", fd, event);
         return false;
     }
 
@@ -268,7 +262,9 @@ bool IOManager::cancelEvent(int fd, Event event) {
     lock.unlock();
 
     FdContext::MutexType::Lock lock2(fd_ctx->mutex);
-    if (SYLAR_UNLIKELY(!(fd_ctx->events & event))) {
+    if (!(fd_ctx->events & event)) {
+        LOG_ERROR("IOManager::cancelEvent false, fd=%d", fd);
+        fd_ctx->mutex.unlock();
         return false;
     }
 
@@ -281,9 +277,7 @@ bool IOManager::cancelEvent(int fd, Event event) {
 
     int rt = epoll_ctl(m_epfd, op, fd, &epevent);
     if (rt) {
-        SYLAR_LOG_ERROR(g_logger) << "epoll_ctl(" << m_epfd << ", "
-                                  << (EpollCtlOp)op << ", " << fd << ", " << (EPOLL_EVENTS)epevent.events << "):"
-                                  << rt << " (" << errno << ") (" << strerror(errno) << ")";
+        LOG_ERROR("IOManager::cancelEvent false, fd=%d, event=%d", fd, event);
         return false;
     }
 
@@ -316,9 +310,8 @@ bool IOManager::cancelAll(int fd) {
 
     int rt = epoll_ctl(m_epfd, op, fd, &epevent);
     if (rt) {
-        SYLAR_LOG_ERROR(g_logger) << "epoll_ctl(" << m_epfd << ", "
-                                  << (EpollCtlOp)op << ", " << fd << ", " << (EPOLL_EVENTS)epevent.events << "):"
-                                  << rt << " (" << errno << ") (" << strerror(errno) << ")";
+        LOG_ERROR("IOManager::cancelAll false, fd=%d", fd);
+        fd_ctx->mutex.unlock();
         return false;
     }
 
@@ -332,7 +325,7 @@ bool IOManager::cancelAll(int fd) {
         --m_pendingEventCount;
     }
 
-    SYLAR_ASSERT(fd_ctx->events == 0);
+    assert(fd_ctx->events == 0);
     return true;
 }
 
@@ -348,7 +341,7 @@ IOManager *IOManager::GetThis() {
  * 如果没有调度线程处理于idle状态，那也就没必要发通知了
  */
 void IOManager::tickle() {
-    SYLAR_LOG_DEBUG(g_logger) << "tickle";
+    LOG_DEBUG("IOManager::tickle %s", "TICKLE");
     //通过这里可以看出，得有空闲线程才向管道中写进行通知，
     //向管道写的作用：这里涉及到了多线程，如任务队列中还有
     //最后一个任务，被一个线程抢到执行，然后这个线程执行run
@@ -375,7 +368,7 @@ void IOManager::tickle() {
     }
     //m_tickleFds[1]是写端，0是读端
     int rt = write(m_tickleFds[1], "T", 1);
-    SYLAR_ASSERT(rt == 1);
+    assert(rt == 1);
 }
 
 bool IOManager::stopping() {
@@ -392,7 +385,7 @@ bool IOManager::stopping() {
  * 如果有触发，那么应该**执行IO事件对应的回调函数**
  */
 void IOManager::idle() {
-    SYLAR_LOG_DEBUG(g_logger) << "idle";
+    LOG_DEBUG("IOManager::idle %s", "start");
 
     // 一次epoll_wait最多接收256个fd的就绪事件，如果超过了这个数，那么会在下
     // 轮epoll_wati继续处理
@@ -408,9 +401,8 @@ void IOManager::idle() {
     while (true) {
         // 获取下一个定时器的超时时间，顺便判断调度器是否停止
         uint64_t next_timeout = 0;
-        if(SYLAR_UNLIKELY(stopping(next_timeout))) {
-            //进入到这里说明当前等待执行的IO事件数量为0，且调度器也停止
-            SYLAR_LOG_DEBUG(g_logger) << "name=" << getName() << "idle stopping exit";
+        if (stopping()) {
+            LOG_DEBUG("IOManager::idle name=%s, idle stopping exit", getName().c_str());
             break;
         }
         int rt = 0;
@@ -433,8 +425,7 @@ void IOManager::idle() {
                 if(errno == EINTR) {
                     continue;
                 }
-                SYLAR_LOG_ERROR(g_logger) << "epoll_wait(" << m_epfd << ") (rt="
-                                        << rt << ") (errno=" << errno << ") (errstr:" << strerror(errno) << ")";
+                LOG_ERROR("IOManager::idle, epoll_wait fd=%d, rt=%d, erro=%s", m_epfd, rt, strerror(errno));
                 break;
             }
         } while(true);
@@ -506,9 +497,7 @@ void IOManager::idle() {
 
             int rt2 = epoll_ctl(m_epfd, op, fd_ctx->fd, &event);
             if (rt2) {
-                SYLAR_LOG_ERROR(g_logger) << "epoll_ctl(" << m_epfd << ", "
-                                          << (EpollCtlOp)op << ", " << fd_ctx->fd << ", " << (EPOLL_EVENTS)event.events << "):"
-                                          << rt2 << " (" << errno << ") (" << strerror(errno) << ")";
+                LOG_ERROR("IOManager::idle left_events false, epfd=%d, fd=%d, error=%s", m_epfd, fd_ctx->fd, strerror(errno));
                 continue;
             }
 
@@ -553,5 +542,3 @@ void IOManager::idle() {
 void IOManager::onTimerInsertedAtFront() {
     tickle();
 }
-
-} // end namespace sylar

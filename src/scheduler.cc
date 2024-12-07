@@ -4,12 +4,8 @@
  * @version 0.1
  * @date 2021-06-15
  */
+#include <assert.h>
 #include "scheduler.h"
-#include "macro.h"
-
-namespace sylar {
-
-static sylar::Logger::ptr g_logger = SYLAR_LOG_NAME("system");
 
 /// 当前线程的调度器，同一个调度器下的所有线程共享同一个实例
 static thread_local Scheduler *t_scheduler = nullptr;
@@ -17,7 +13,7 @@ static thread_local Scheduler *t_scheduler = nullptr;
 static thread_local Fiber *t_scheduler_fiber = nullptr;
 
 Scheduler::Scheduler(size_t threads, bool use_caller, const std::string &name) {
-    SYLAR_ASSERT(threads > 0);
+    assert(threads > 0);
 
     m_useCaller = use_caller;
     m_name      = name;
@@ -26,7 +22,7 @@ Scheduler::Scheduler(size_t threads, bool use_caller, const std::string &name) {
         --threads;
         // 主线程的调度器，caller线程的主协程,用 GetThis()获取
         sylar::Fiber::GetThis();// 获取主协程
-        SYLAR_ASSERT(GetThis() == nullptr);
+        assert(GetThis() == nullptr);
         t_scheduler = this;
 
         /**
@@ -62,7 +58,7 @@ void Scheduler::setThis() {
 }
 
 Scheduler::~Scheduler() {
-    SYLAR_LOG_DEBUG(g_logger) << "Scheduler::~Scheduler()";
+    LOG_DEBUG("Scheduler::~Scheduler %s is deleting", m_name.c_str());
     SYLAR_ASSERT(m_stopping);
     if (GetThis() == this) {
         t_scheduler = nullptr;
@@ -71,14 +67,14 @@ Scheduler::~Scheduler() {
 
 // 启动调度器，对调度器进行一些列的初始化（初始化线程池）。
 void Scheduler::start() {
-    SYLAR_LOG_DEBUG(g_logger) << "start";
+    LOG_DEBUG("Scheduler::start %s", m_name.c_str());
     MutexType::Lock lock(m_mutex);
     if (m_stopping) {
-        SYLAR_LOG_ERROR(g_logger) << "Scheduler is stopped";
+        LOG_ERROR("Scheduler::start %s ERROR", m_name);
         return;
     }
     // 线程池是否为空
-    SYLAR_ASSERT(m_threads.empty());
+    assert(m_threads.empty());
     // 重新设置线程池的大小
     m_threads.resize(m_threadCount);
     for (size_t i = 0; i < m_threadCount; i++) {
@@ -95,18 +91,18 @@ bool Scheduler::stopping() {
 }
 
 void Scheduler::tickle() { 
-    SYLAR_LOG_DEBUG(g_logger) << "ticlke"; 
+    LOG_DEBUG("Scheduler::tickle %s", "TICKLE NOW"); 
 }
 
 void Scheduler::idle() {
-    SYLAR_LOG_DEBUG(g_logger) << "idle";
+    LOG_DEBUG("Sscheduler::idle %s", "IDLE NOW");
     while (!stopping()) {
-        sylar::Fiber::GetThis()->yield();
+        Fiber::GetThis()->yield();
     }
 }
 
 void Scheduler::stop() {
-    SYLAR_LOG_DEBUG(g_logger) << "stop";
+    LOG_DEBUG("Scheduler::stop %s", "STOP NOW");
     if (stopping()) {
         // 已经停止了
         return;
@@ -116,13 +112,13 @@ void Scheduler::stop() {
     if (m_useCaller) {
         // 判断调用 stop 的线程是否为当前调度器的线程。
         // 即使用了 caller 线程作为调度器，只能由 caller 线程发起 stop。
-        SYLAR_ASSERT(GetThis() == this);
+        assert(GetThis() == this);
     } else {
         // 如果 m_useCaller 为 false 时，下面这句是什么意思？
         // 因为 m_useCaller 为 false 时，调度器的主协程是由线程的调度协程创建的，
         // 所以主线程应该为各自线程，而 stop 应该由主线程发起，GetThis() 是获取
         // 调度器线程的，在 main 中，所以这里的主线程不应该是 main 线程。
-        SYLAR_ASSERT(GetThis() != this);
+        assert(GetThis() != this);
     }
 
     // 通知所有线程进行调度，让它们退出循环，并等待所有线程结束。
@@ -138,7 +134,7 @@ void Scheduler::stop() {
     // 如果 caller 线程的调度协程存在，这里还要进行调度完，即切换到任务协程去消耗任务。
     if (m_rootFiber) {
         m_rootFiber->resume();
-        SYLAR_LOG_DEBUG(g_logger) << "m_rootFiber end";
+        LOG_DEBUG("Scheduler::stop %s", "m_rootFiber End");
     }
 
     std::vector<Thread::ptr> thrs;
@@ -154,13 +150,13 @@ void Scheduler::stop() {
 }
 
 void Scheduler::run() {
-    SYLAR_LOG_DEBUG(g_logger) << "run";
+    LOG_DEBUG("Scheduler::run %s", "RUN BEGIN");
     //运行到本调度器，设置当前线程的调度器。
     setThis();
     if (sylar::GetThreadId() != m_rootThread) {
         // 非主线程的调度器，将当前线程的调度协程保存起来,
         // 以便在stop时，返回caller线程的主协程
-        t_scheduler_fiber = sylar::Fiber::GetThis().get();
+        t_scheduler_fiber = Fiber::GetThis().get();
     }
 
     Fiber::ptr idle_fiber(new Fiber(std::bind(&Scheduler::idle, this)));
@@ -176,7 +172,7 @@ void Scheduler::run() {
             auto it = m_tasks.begin();
             // 遍历所有调度任务
             while (it != m_tasks.end()) {
-                if (it->thread != -1 && it->thread != sylar::GetThreadId()) {
+                if (it->thread != -1 && it->thread != Thread::GetThreadId()) {
                     // 任务队列中的任务指定了调度线程，但不是当前线程，跳过这个任务，继续下一个,因为在初始化时
                     // 会指定哪个线程调度，如果 it->thread == -1，说明这个任务没有指定线程。这时也要通知其他
                     // 线程进行调度，直到那个线程来了与 GetThreadId() 相等。所以这里不跳过这个任务，而是继续下一个。
@@ -186,10 +182,10 @@ void Scheduler::run() {
                 }
 
                 // 找到一个未指定线程，或是指定了当前线程的任务
-                SYLAR_ASSERT(it->fiber || it->cb);
+                assert(it->fiber || it->cb);
                 if (it->fiber) {
                     // 如果是协程，则进去判断是否为 ready 状态。
-                    SYLAR_ASSERT(it->fiber->getState() == Fiber::READY);
+                    assert(it->fiber->getState() == Fiber::READY);
                 }
                 // 当前调度线程找到一个任务，准备开始调度，将其从任务队列中剔除，活动线程数加1
                 task = *it;// 将这个任务给 task
@@ -232,7 +228,7 @@ void Scheduler::run() {
             // 进到这个分支情况一定是任务队列空了，调度idle协程即可
             if (idle_fiber->getState() == Fiber::TERM) {
                 // 如果 idle_fiber 已经终止了，说明调度器已经停止了，则退出循环。
-                SYLAR_LOG_DEBUG(g_logger) << "idle fiber term";
+                LOG_DEBUG("Scheduler::run %s", "Idle Fiber TERM");
                 break;
             }
             // 不是 TERM 状态的话，就会一直 resume 到 idle_fiber 协程，然后又在
@@ -242,7 +238,5 @@ void Scheduler::run() {
             --m_idleThreadCount;
         }
     }
-    SYLAR_LOG_DEBUG(g_logger) << "Scheduler::run() exit";
+    LOG_DEBUG("Scheduler::run %s", "RUN EXIT");
 }
-
-} // end namespace sylar

@@ -1,22 +1,13 @@
-/**
- * @file scheduler.h
- * @brief 协程调度器实现
- * @version 0.1
- * @date 2021-06-15
- */
-
-#ifndef __SYLAR_SCHEDULER_H__
-#define __SYLAR_SCHEDULER_H__
+#ifndef __SCHEDULER_H__
+#define __SCHEDULER_H__
 
 #include <functional>
 #include <list>
 #include <memory>
 #include <string>
 #include "fiber.h"
-#include "log.h"
+#include "../log/log.h"
 #include "thread.h"
-
-namespace sylar {
 
 /**
  * @brief 协程调度器
@@ -196,7 +187,5 @@ private:
     /// 是否正在停止
     bool m_stopping = false;
 };
-
-} // end namespace sylar
 
 #endif

@@ -2,8 +2,6 @@
 #include "util.h"
 #include "macro.h"
 
-namespace sylar {
-
 bool Timer::Comparator::operator()(const Timer::ptr& lhs
                         ,const Timer::ptr& rhs) const {
     if(!lhs && !rhs) {
@@ -31,7 +29,7 @@ Timer::Timer(uint64_t ms, std::function<void()> cb,
     ,m_ms(ms)
     ,m_cb(cb)
     ,m_manager(manager) {
-    m_next = sylar::GetElapsedMS() + m_ms;
+    m_next = TimerManager::GetElapsed() + m_ms;
 }
 
 Timer::Timer(uint64_t next)
@@ -61,7 +59,7 @@ bool Timer::refresh() {
     }
     m_manager->m_timers.erase(it);
     //删除要刷新的节点后，设置好时间后重新插入到小根堆中
-    m_next = sylar::GetElapsedMS() + m_ms;
+    m_next = TimerManager::GetElapsed() + m_ms;
     m_manager->m_timers.insert(shared_from_this());
     return true;
 }
@@ -81,7 +79,7 @@ bool Timer::reset(uint64_t ms, bool from_now) {
     m_manager->m_timers.erase(it);
     uint64_t start = 0;
     if(from_now) {
-        start = sylar::GetElapsedMS();
+        start = TimerManager::GetElapsed();
     } else {
         //这里可能是因为有一个构造函数是直接以最终执行时间
         //m_next 为参数直接构造的，所以这里需要判断是否是
@@ -132,7 +130,7 @@ uint64_t TimerManager::getNextTimer() {
     }
 
     const Timer::ptr& next = *m_timers.begin();
-    uint64_t now_ms = sylar::GetElapsedMS();
+    uint64_t now_ms = TimerManager::GetElapsed();
     if(now_ms >= next->m_next) {
         return 0;
     } else {
@@ -141,7 +139,7 @@ uint64_t TimerManager::getNextTimer() {
 }
 
 void TimerManager::listExpiredCb(std::vector<std::function<void()> >& cbs) {
-    uint64_t now_ms = sylar::GetElapsedMS();
+    uint64_t now_ms = TimerManager::GetElapsed();
     std::vector<Timer::ptr> expired;
     {
         RWMutexType::ReadLock lock(m_mutex);

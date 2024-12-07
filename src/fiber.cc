@@ -6,15 +6,11 @@
  */
 
 #include <atomic>
+#include <assert.h>
 #include "fiber.h"
-#include "config.h"
-#include "log.h"
+#include "../log/log.h"
 #include "macro.h"
 #include "scheduler.h"
-
-namespace sylar {
-
-static Logger::ptr g_logger = SYLAR_LOG_NAME("system");
 
 /// 全局静态变量，用于生成协程id
 static std::atomic<uint64_t> s_fiber_id{0};
@@ -26,9 +22,8 @@ static thread_local Fiber *t_fiber = nullptr;
 /// 线程局部变量，当前线程的主协程，切换到这个协程，就相当于切换到了主线程中运行，智能指针形式
 static thread_local Fiber::ptr t_thread_fiber = nullptr;
 
-//协程栈大小，可通过配置文件获取，默认128k
-static ConfigVar<uint32_t>::ptr g_fiber_stack_size =
-    Config::Lookup<uint32_t>("fiber.stack_size", 128 * 1024, "fiber stack size");
+//协程栈默认大小 128k
+static uint32_t fiber_stack_size = 128 * 1024;
 
 /**
  * @brief malloc栈内存分配器
@@ -62,7 +57,7 @@ Fiber::Fiber() {
     ++s_fiber_count;
     m_id = s_fiber_id++; // 协程id从0开始，用完加1
 
-    SYLAR_LOG_DEBUG(g_logger) << "Fiber::Fiber() main id = " << m_id;
+    LOG_DEBUG("Fiber::Fiber main id = %llu", m_id);
 }
 
 void Fiber::SetThis(Fiber *f) { 
@@ -80,6 +75,7 @@ Fiber::ptr Fiber::GetThis() {
 
     // 这里相当于调用了无参构造函数，创建了线程的主协程
     Fiber::ptr main_fiber(new Fiber);// 一创建协程对象就初始化好了，详见 Fiber()
+    assert(t_fiber == main_fiber.get());
     SYLAR_ASSERT(t_fiber == main_fiber.get());
     t_thread_fiber = main_fiber;
     return t_fiber->shared_from_this();
@@ -97,7 +93,7 @@ Fiber::Fiber(std::function<void()> cb, size_t stacksize, bool run_in_scheduler)
     m_stack     = StackAllocator::Alloc(m_stacksize);
 
     if (getcontext(&m_ctx)) {
-        SYLAR_ASSERT2(false, "getcontext");
+        LOG_ERROR("%llu Fiber getcontext wrong", s_fiber_id);
     }
 
     m_ctx.uc_link          = nullptr;
@@ -106,24 +102,26 @@ Fiber::Fiber(std::function<void()> cb, size_t stacksize, bool run_in_scheduler)
 
     makecontext(&m_ctx, &Fiber::MainFunc, 0);
 
-    SYLAR_LOG_DEBUG(g_logger) << "Fiber::Fiber() id = " << m_id;
+    LOG_DEBUG("Fiber::Fiber main id = %llu", m_id);
 }
 
 /**
  * 线程的主协程析构时需要特殊处理，因为主协程没有分配栈和cb
  */
 Fiber::~Fiber() {
-    SYLAR_LOG_DEBUG(g_logger) << "Fiber::~Fiber() id = " << m_id;
+    LOG_DEBUG("Fiber::~Fiber() id = %llu", m_id);
     --s_fiber_count;
     if (m_stack) {
         // 有栈，说明是子协程，需要确保子协程一定是结束状态
-        SYLAR_ASSERT(m_state == TERM);
+        if (m_state != TERM) {
+            LOG_ERROR("Fiber::~Fiber error not TERM id = %llu", m_id);
+        }
         StackAllocator::Dealloc(m_stack, m_stacksize);
-        SYLAR_LOG_DEBUG(g_logger) << "dealloc stack, id = " << m_id;
+        LOG_DEBUG("Fiber::~Fiber deallocate stack id = %llu", m_id);
     } else {
         // 没有栈，说明是线程的主协程
-        SYLAR_ASSERT(!m_cb);              // 主协程没有cb
-        SYLAR_ASSERT(m_state == RUNNING); // 主协程一定是执行状态
+        assert(!m_cb);// 主协程没有cb
+        assert(m_state == RUNNING); // 主协程一定是执行状态
 
         Fiber *cur = t_fiber; // 当前协程就是自己
         if (cur == this) {
@@ -137,11 +135,11 @@ Fiber::~Fiber() {
  * 但其实刚创建好但没执行过的协程也应该允许重置的
  */
 void Fiber::reset(std::function<void()> cb) {
-    SYLAR_ASSERT(m_stack);
-    SYLAR_ASSERT(m_state == TERM);
+    if (!m_stack) LOG_ERROR("Fiber::reset no stack, id = %llu", m_id);
+    if (m_state != TERM) LOG_ERROR("Fiber::reset fiber not TERM id = %llu", m_id);
     m_cb = cb;
     if (getcontext(&m_ctx)) {
-        SYLAR_ASSERT2(false, "getcontext");
+        LOG_ERROR("%llu Fiber getcontext wrong", s_fiber_id);
     }
 
     m_ctx.uc_link          = nullptr;
@@ -153,7 +151,9 @@ void Fiber::reset(std::function<void()> cb) {
 }
 
 void Fiber::resume() {
-    SYLAR_ASSERT(m_state != TERM && m_state != RUNNING);
+    if (m_state == TERM || m_state == RUNNING) 
+        LOG_ERROR("Fiber::resume %llu is TERM or RUNNING, can't resume", m_id);
+    assert(m_state != TERM && m_state != RUNNING);
     SetThis(this);
     m_state = RUNNING;
 
@@ -162,18 +162,21 @@ void Fiber::resume() {
         // 第一个参数为获取调度器协程,m_ctx为调用者的上下文，即调用 resume() 的协程。
         // 使用 swapcontext() 后就切换到调用者的上下文了。
         if (swapcontext(&(Scheduler::GetMainFiber()->m_ctx), &m_ctx)) {
-            SYLAR_ASSERT2(false, "swapcontext");
+            LOG_ERROR("Fiber::resume %s", "Scheduler Resume Fault");
         }
     } else {
         if (swapcontext(&(t_thread_fiber->m_ctx), &m_ctx)) {
-            SYLAR_ASSERT2(false, "swapcontext");
+            LOG_ERROR("Fiber::resume %s", "Main Thread Resume Fault");
         }
     }
 }
 
 void Fiber::yield() {
     /// 协程运行完之后会自动yield一次，用于回到主协程，此时状态已为结束状态
-    SYLAR_ASSERT(m_state == RUNNING || m_state == TERM);
+    if (m_state != TERM && m_state != RUNNING) 
+        LOG_ERROR("Fiber::yield %llu not TERM or RUNNING, can't yield, curr state is %d", m_id, m_state);
+    assert(m_state == RUNNING || m_state == TERM);
+
     SetThis(t_thread_fiber.get());
     if (m_state != TERM) {
         m_state = READY;
@@ -182,11 +185,11 @@ void Fiber::yield() {
     // 如果协程参与调度器调度，那么应该和调度器的主协程进行swap，而不是线程主协程
     if (m_runInScheduler) {
         if (swapcontext(&m_ctx, &(Scheduler::GetMainFiber()->m_ctx))) {
-            SYLAR_ASSERT2(false, "swapcontext");
+            LOG_ERROR("Fiber::yield %s", "Scheduler Yield Fault");
         }
     } else {
         if (swapcontext(&m_ctx, &(t_thread_fiber->m_ctx))) {
-            SYLAR_ASSERT2(false, "swapcontext");
+            LOG_ERROR("Fiber::yield %s", "Main Thread Yield Fault");
         }
     }
 }
@@ -198,7 +201,10 @@ void Fiber::MainFunc() {
     // 执行到这里肯定已经不是该线程第一次创建协程，所以返回的是 t_fiber，
     // 即当前正在运行的协程。
     Fiber::ptr cur = GetThis(); // GetThis()的shared_from_this()方法让引用计数加1
-    SYLAR_ASSERT(cur);
+    if (!cur) {
+        LOG_ERROR("Fiber::MainFunc cur is nullptr");
+    }
+    assert(cur);
 
     cur->m_cb();//执行该协程的任务
     cur->m_cb    = nullptr;
@@ -208,5 +214,3 @@ void Fiber::MainFunc() {
     cur.reset();
     raw_ptr->yield();
 }
-
-} // namespace sylar

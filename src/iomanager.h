@@ -5,15 +5,11 @@
  * @date 2021-06-16
  */
 
-#ifndef __SYLAR_IOMANAGER_H__
-#define __SYLAR_IOMANAGER_H__
+#ifndef __IOMANAGER_H__
+#define __IOMANAGER_H__
 
 #include "scheduler.h"
 #include "timer.h"
-
-namespace sylar {
-
-static sylar::Logger::ptr g_logger = SYLAR_LOG_NAME("system");
 
 class IOManager : public Scheduler, public TimerManager {
 public:
@@ -197,7 +193,5 @@ private:
     /// socket事件上下文的容器
     std::vector<FdContext *> m_fdContexts;
 };
-
-} // end namespace sylar
 
 #endif

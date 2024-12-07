@@ -1,11 +1,5 @@
-/**
- * @file mutex.h
- * @brief 信号量，互斥锁，读写锁，范围锁模板，自旋锁，原子锁
- * @version 0.1
- * @date 2021-06-09
- */
-#ifndef __SYLAR_MUTEX_H__
-#define __SYLAR_MUTEX_H__
+#ifndef __MUTEX_H__
+#define __MUTEX_H__
 
 #include <thread>
 #include <functional>
@@ -17,8 +11,6 @@
 #include <list>
 
 #include "noncopyable.h"
-
-namespace sylar {
 
 /**
  * @brief 信号量
@@ -428,7 +420,5 @@ private:
     /// 原子状态
     volatile std::atomic_flag m_mutex;
 };
-
-} // namespace sylar
 
 #endif // __SYLAR_MUTEX_H__

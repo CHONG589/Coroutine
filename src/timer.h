@@ -1,20 +1,10 @@
-/**
- * @file timer.h
- * @brief 定时器封装
- * @author sylar.yin
- * @email 564628276@qq.com
- * @date 2019-05-28
- * @copyright Copyright (c) 2019年 sylar.yin All rights reserved (www.sylar.top)
- */
-#ifndef __SYLAR_TIMER_H__
-#define __SYLAR_TIMER_H__
+#ifndef __TIMER_H__
+#define __TIMER_H__
 
 #include <memory>
 #include <vector>
 #include <set>
 #include "mutex.h"
-
-namespace sylar {
 
 class TimerManager;
 /**
@@ -160,6 +150,11 @@ private:
      * @brief 检测服务器时间是否被调后了
      */
     bool detectClockRollover(uint64_t now_ms);
+    static uint64_t GetElapsed() {
+        struct timespec ts = {0};
+        clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+        return ts.tv_sec * 1000 + ts.tv_nsec / 1000000.0;
+    }
 private:
     /// Mutex
     RWMutexType m_mutex;
@@ -175,7 +170,5 @@ private:
     /// 上次执行时间
     uint64_t m_previouseTime = 0;
 };
-
-}
 
 #endif

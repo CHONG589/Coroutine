@@ -1,13 +1,4 @@
-/**
- * @file mutex.cc
- * @brief 信号量实现
- * @version 0.1
- * @date 2021-06-09
- */
-
 #include "mutex.h"
-
-namespace sylar {
 
 Semaphore::Semaphore(uint32_t count) {
     if(sem_init(&m_semaphore, 0, count)) {
@@ -30,5 +21,3 @@ void Semaphore::notify() {
         throw std::logic_error("sem_post error");
     }
 }
-
-} // namespace sylar

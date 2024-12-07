@@ -1,11 +1,3 @@
-/**
- * @file fd_manager.h
- * @brief 文件句柄管理类
- * @author sylar.yin
- * @email 564628276@qq.com
- * @date 2019-05-30
- * @copyright Copyright (c) 2019年 sylar.yin All rights reserved (www.sylar.top)
- */
 #ifndef __FD_MANAGER_H__
 #define __FD_MANAGER_H__
 
@@ -13,8 +5,6 @@
 #include <vector>
 #include "thread.h"
 #include "singleton.h"
-
-namespace sylar {
 
 /**
  * @brief 文件句柄上下文类
@@ -116,6 +106,8 @@ private:
 class FdManager {
 public:
     typedef RWMutex RWMutexType;
+    /// 文件句柄单例
+    typedef Singleton<FdManager> FdMgr;
     /**
      * @brief 无参构造函数
      */
@@ -140,10 +132,5 @@ private:
     /// 文件句柄集合
     std::vector<FdCtx::ptr> m_datas;
 };
-
-/// 文件句柄单例
-typedef Singleton<FdManager> FdMgr;
-
-}
 
 #endif

@@ -8,12 +8,8 @@
 #include "log.h"
 #include "util.h"
 
-namespace sylar {
-
 static thread_local Thread *t_thread          = nullptr;
 static thread_local std::string t_thread_name = "UNKNOW";
-
-static sylar::Logger::ptr g_logger = SYLAR_LOG_NAME("system");
 
 Thread *Thread::GetThis() {
     return t_thread;
@@ -41,8 +37,6 @@ Thread::Thread(std::function<void()> cb, const std::string &name)
     }
     int rt = pthread_create(&m_thread, nullptr, &Thread::run, this);
     if (rt) {
-        SYLAR_LOG_ERROR(g_logger) << "pthread_create thread fail, rt=" << rt
-                                  << " name=" << name;
         throw std::logic_error("pthread_create error");
     }
     m_semaphore.wait();
@@ -58,8 +52,6 @@ void Thread::join() {
     if (m_thread) {
         int rt = pthread_join(m_thread, nullptr);
         if (rt) {
-            SYLAR_LOG_ERROR(g_logger) << "pthread_join thread fail, rt=" << rt
-                                      << " name=" << m_name;
             throw std::logic_error("pthread_join error");
         }
         m_thread = 0;
@@ -81,5 +73,3 @@ void *Thread::run(void *arg) {
     cb();
     return 0;
 }
-
-} // namespace sylar

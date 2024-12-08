@@ -1,0 +1,12 @@
+2024-12-08 19:27:11.352073 [info] : Main fiber 0 created
+2024-12-08 19:27:11.352146 [info] : Task fiber 1 created
+2024-12-08 19:27:11.352208 [info] : iom created
+2024-12-08 19:27:11.352221 [debug]: Scheduler::start IOManager
+2024-12-08 19:27:11.352231 [info] : add test_io
+2024-12-08 19:27:11.352390 [debug]: IOManager::tickle...
+2024-12-08 19:27:11.352405 [debug]: Scheduler::stop...
+2024-12-08 19:27:11.352410 [debug]: IOManager::tickle...
+2024-12-08 19:27:11.352418 [debug]: Scheduler::run begin
+2024-12-08 19:27:11.352442 [info] : Task fiber 2 created
+2024-12-08 19:27:11.352465 [info] : Task fiber 3 created
+2024-12-08 19:27:11.352472 [info] : run fun in scheduler

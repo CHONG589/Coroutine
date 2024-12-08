@@ -150,7 +150,7 @@ void TimerManager::listExpiredCb(std::vector<std::function<void()> >& cbs) {
         return;
     }
     bool rollover = false;
-    if(SYLAR_UNLIKELY(detectClockRollover(now_ms))) {
+    if(detectClockRollover(now_ms)) {
         // 使用clock_gettime(CLOCK_MONOTONIC_RAW)，应该不可能出现时间回退的问题
         rollover = true;
     }

@@ -1,12 +1,3 @@
-/**
- * @file hook.h
- * @brief hook函数封装
- * @author sylar.yin
- * @email 564628276@qq.com
- * @date 2019-06-02
- * @copyright Copyright (c) 2019年 sylar.yin All rights reserved (www.sylar.top)
- */
-
 #ifndef __HOOK_H__
 #define __HOOK_H__
 

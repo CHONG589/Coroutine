@@ -1,10 +1,3 @@
-/**
- * @file iomanager.h
- * @brief IO协程调度器
- * @version 0.1
- * @date 2021-06-16
- */
-
 #ifndef __IOMANAGER_H__
 #define __IOMANAGER_H__
 
@@ -139,6 +132,8 @@ public:
      * @brief 返回当前的IOManager
      */
     static IOManager *GetThis();
+
+    int setnonblocking(int fd);
 
 protected:
     /**

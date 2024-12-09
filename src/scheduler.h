@@ -6,7 +6,7 @@
 #include <memory>
 #include <string>
 #include "fiber.h"
-#include "../log/log.h"
+#include "log.h"
 #include "thread.h"
 
 /**

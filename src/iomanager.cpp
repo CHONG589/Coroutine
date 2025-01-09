@@ -441,6 +441,9 @@ void IOManager::idle() {
                 LOG_ERROR("IOManager::idle, epoll_wait fd=%d, rt=%d, erro=%s", m_epfd, rt, strerror(errno));
                 break;
             }
+            else {
+                break;
+            }
         } while(true);
 
         // 收集所有已超时的定时器，执行回调函数

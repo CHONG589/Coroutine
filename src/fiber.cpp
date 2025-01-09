@@ -1,10 +1,3 @@
-/**
- * @file fiber.cpp
- * @brief 协程实现
- * @version 0.1
- * @date 2021-06-15
- */
-
 #include <atomic>
 #include <assert.h>
 #include "fiber.h"
@@ -18,7 +11,8 @@ static std::atomic<uint64_t> s_fiber_count{0};
 
 /// 线程局部变量，当前线程正在运行的协程
 static thread_local Fiber *t_fiber = nullptr;
-/// 线程局部变量，当前线程的主协程，切换到这个协程，就相当于切换到了主线程中运行，智能指针形式
+/// 线程局部变量，当前线程的主协程，切换到这个协程，就相当于切换到了主线程
+/// 中运行，智能指针形式
 static thread_local Fiber::ptr t_thread_fiber = nullptr;
 
 //协程栈默认大小 128k
@@ -50,7 +44,7 @@ Fiber::Fiber() {
     m_state = RUNNING;
 
     if (getcontext(&m_ctx)) {// 获取主协程的上下文
-        //SYLAR_ASSERT2(false, "getcontext");
+        LOG_ERROR("getcontext error!");
     }
 
     ++s_fiber_count;
@@ -73,8 +67,7 @@ Fiber::ptr Fiber::GetThis() {
     }
 
     // 这里相当于调用了无参构造函数，创建了线程的主协程
-    Fiber::ptr main_fiber(new Fiber);// 一创建协程对象就初始化好了，详见 Fiber()
-    assert(t_fiber == main_fiber.get());
+    Fiber::ptr main_fiber(new Fiber);
     assert(t_fiber == main_fiber.get());
     t_thread_fiber = main_fiber;
     return t_fiber->shared_from_this();
@@ -92,7 +85,7 @@ Fiber::Fiber(std::function<void()> cb, size_t stacksize, bool run_in_scheduler)
     m_stack     = StackAllocator::Alloc(m_stacksize);
 
     if (getcontext(&m_ctx)) {
-        //LOG_ERROR("%llu Fiber getcontext wrong", s_fiber_id);
+        LOG_ERROR("getcontext error!");
     }
 
     m_ctx.uc_link          = nullptr;
@@ -137,7 +130,7 @@ void Fiber::reset(std::function<void()> cb) {
     if (m_state != TERM) LOG_ERROR("fiber %llu reset fiber not term", m_id);
     m_cb = cb;
     if (getcontext(&m_ctx)) {
-        //LOG_ERROR("%llu Fiber getcontext wrong", s_fiber_id);
+        LOG_ERROR("getcontext error!");
     }
 
     m_ctx.uc_link          = nullptr;
@@ -149,8 +142,10 @@ void Fiber::reset(std::function<void()> cb) {
 }
 
 void Fiber::resume() {
-    if (m_state == TERM || m_state == RUNNING) 
-        LOG_ERROR("fiber %llu resume is TERM or RUNNING, can't resume", m_id);
+    if (m_state == TERM) 
+        LOG_ERROR("fiber %llu resume is TERM, can't resume", m_id);
+    if (m_state == RUNNING) 
+        LOG_ERROR("fiber %llu resume is RUNNING, can't resume", m_id);
     assert(m_state != TERM && m_state != RUNNING);
     SetThis(this);
     m_state = RUNNING;

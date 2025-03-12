@@ -1,15 +1,9 @@
-/**
- * @file scheduler.cc
- * @brief 协程调度器实现
- * @version 0.1
- * @date 2021-06-15
- */
 #include <assert.h>
 #include "scheduler.h"
 
-/// 当前线程的调度器，同一个调度器下的所有线程共享同一个实例
+// 当前线程的调度器，同一个调度器下的所有线程共享同一个实例
 static thread_local Scheduler *t_scheduler = nullptr;
-/// 当前线程的调度协程，每个线程都独有一份
+// 当前线程的调度协程，每个线程都独有一份
 static thread_local Fiber *t_scheduler_fiber = nullptr;
 
 Scheduler::Scheduler(size_t threads, bool use_caller, const std::string &name) {
@@ -21,14 +15,13 @@ Scheduler::Scheduler(size_t threads, bool use_caller, const std::string &name) {
     if (use_caller) {
         --threads;
         // 主线程的调度器，caller线程的主协程,用 GetThis()获取
-        Fiber::GetThis();// 获取主协程
+        Fiber::GetThis();
         assert(GetThis() == nullptr);
         t_scheduler = this;
 
-        /**
-         * caller线程的主协程不会被线程的调度协程run进行调度，而且，线程的调度协程停止时，应该返回caller线程的主协程
-         * 在user caller情况下，把caller线程的主协程暂时保存起来，等调度协程结束时，再resume caller协程
-         */
+        //caller线程的主协程不会被线程的调度协程run进行调度，而且，线程的调度协程停
+        //止时，应该返回caller线程的主协程在user caller情况下，把caller线程的主协
+        //程暂时保存起来，等调度协程结束时，再resume caller协程
         // 获取调度协程
         m_rootFiber.reset(new Fiber(std::bind(&Scheduler::run, this), 0, false));
 
@@ -37,7 +30,8 @@ Scheduler::Scheduler(size_t threads, bool use_caller, const std::string &name) {
         m_rootThread      = Thread::GetThreadId();
         // 将线程 id 加入到线程池。
         m_threadIds.push_back(m_rootThread);
-    } else {
+    } 
+    else {
         // 非caller线程的调度器，-1 表示不指定线程
         m_rootThread = -1;
     }
@@ -188,7 +182,7 @@ void Scheduler::run() {
                     assert(it->fiber->getState() == Fiber::READY);
                 }
                 // 当前调度线程找到一个任务，准备开始调度，将其从任务队列中剔除，活动线程数加1
-                task = *it;// 将这个任务给 task
+                task = *it;
                 m_tasks.erase(it++);
                 ++m_activeThreadCount;
                 break;
@@ -204,20 +198,22 @@ void Scheduler::run() {
             tickle();
         }
 
-        if (task.fiber) {// task 为协程，则resume协程
+        if (task.fiber) {
             // resume协程，resume返回时，协程要么执行完了，要么半路yield了，
             //总之这个任务就算完成了，活跃线程数减一
             LOG_INFO("run fiber in scheduler");
             task.fiber->resume();
             --m_activeThreadCount;
             task.reset();
-        } else if (task.cb) {
+        } 
+        else if (task.cb) {
             // task 为回调函数，则创建新的协程，执行回调函数
             if (cb_fiber) {
                 // 如果cb_fiber已经有协程了，说明上一个任务的回调函数还没执行完，则重新设置这个
                 // 协程的回调函数。只需将这个任务的相关信息设置到这个协程上即可。
                 cb_fiber->reset(task.cb);
-            } else {
+            } 
+            else {
                 // 如果协程没有被创建，则创建新的协程，并设置回调函数
                 cb_fiber.reset(new Fiber(task.cb));
             }
@@ -226,7 +222,8 @@ void Scheduler::run() {
             cb_fiber->resume();
             --m_activeThreadCount;
             cb_fiber.reset();
-        } else {
+        } 
+        else {
             // 进到这个分支情况一定是任务队列空了，调度idle协程即可
             if (idle_fiber->getState() == Fiber::TERM) {
                 // 如果 idle_fiber 已经终止了，说明调度器已经停止了，则退出循环。

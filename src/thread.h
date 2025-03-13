@@ -57,8 +57,6 @@ public:
      */
     static void SetName(const std::string &name);
 
-    static pid_t GetThreadId() { return syscall(SYS_gettid); }
-
 private:
     /**
      * @brief 线程执行函数

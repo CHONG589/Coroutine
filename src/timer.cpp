@@ -1,38 +1,5 @@
 #include "timer.h"
-
-bool Timer::Comparator::operator()(const Timer::ptr& lhs
-                        ,const Timer::ptr& rhs) const {
-    if(!lhs && !rhs) {
-        return false;
-    }
-    if(!lhs) {
-        return true;
-    }
-    if(!rhs) {
-        return false;
-    }
-    if(lhs->m_next < rhs->m_next) {
-        return true;
-    }
-    if(rhs->m_next < lhs->m_next) {
-        return false;
-    }
-    return lhs.get() < rhs.get();
-}
-
-
-Timer::Timer(uint64_t ms, std::function<void()> cb,
-             bool recurring, TimerManager* manager)
-    :m_recurring(recurring)
-    ,m_ms(ms)
-    ,m_cb(cb)
-    ,m_manager(manager) {
-    m_next = TimerManager::GetElapsed() + m_ms;
-}
-
-Timer::Timer(uint64_t next)
-    :m_next(next) {
-}
+#include "util.h"
 
 bool Timer::cancel() {
     TimerManager::RWMutexType::WriteLock lock(m_manager->m_mutex);
@@ -57,7 +24,7 @@ bool Timer::refresh() {
     }
     m_manager->m_timers.erase(it);
     //删除要刷新的节点后，设置好时间后重新插入到小根堆中
-    m_next = TimerManager::GetElapsed() + m_ms;
+    m_next = GetElapsedMS() + m_ms;
     m_manager->m_timers.insert(shared_from_this());
     return true;
 }
@@ -77,7 +44,7 @@ bool Timer::reset(uint64_t ms, bool from_now) {
     m_manager->m_timers.erase(it);
     uint64_t start = 0;
     if(from_now) {
-        start = TimerManager::GetElapsed();
+        start = GetElapsedMS();
     } else {
         //这里可能是因为有一个构造函数是直接以最终执行时间
         //m_next 为参数直接构造的，所以这里需要判断是否是
@@ -92,8 +59,42 @@ bool Timer::reset(uint64_t ms, bool from_now) {
 
 }
 
+Timer::Timer(uint64_t ms, std::function<void()> cb,
+             bool recurring, TimerManager* manager)
+    :m_recurring(recurring)
+    ,m_ms(ms)
+    ,m_cb(cb)
+    ,m_manager(manager) {
+    m_next = GetElapsedMS() + m_ms;
+}
+
+Timer::Timer(uint64_t next)
+    :m_next(next) {
+}
+
+bool Timer::Comparator::operator()(const Timer::ptr& lhs
+            , const Timer::ptr& rhs) const {
+
+    if(!lhs && !rhs) {
+        return false;
+    }
+    if(!lhs) {
+        return true;
+    }
+    if(!rhs) {
+        return false;
+    }
+    if(lhs->m_next < rhs->m_next) {
+        return true;
+    }
+    if(rhs->m_next < lhs->m_next) {
+        return false;
+    }
+        return lhs.get() < rhs.get();
+    }
+
 TimerManager::TimerManager() {
-    m_previouseTime = GetElapsed();
+    m_previouseTime = GetElapsedMS();
 }
 
 TimerManager::~TimerManager() {
@@ -128,7 +129,7 @@ uint64_t TimerManager::getNextTimer() {
     }
 
     const Timer::ptr& next = *m_timers.begin();
-    uint64_t now_ms = TimerManager::GetElapsed();
+    uint64_t now_ms = GetElapsedMS();
     if(now_ms >= next->m_next) {
         return 0;
     } else {
@@ -137,7 +138,7 @@ uint64_t TimerManager::getNextTimer() {
 }
 
 void TimerManager::listExpiredCb(std::vector<std::function<void()> >& cbs) {
-    uint64_t now_ms = TimerManager::GetElapsed();
+    uint64_t now_ms = GetElapsedMS();
     std::vector<Timer::ptr> expired;
     {
         RWMutexType::ReadLock lock(m_mutex);
@@ -191,6 +192,11 @@ void TimerManager::listExpiredCb(std::vector<std::function<void()> >& cbs) {
     }
 }
 
+bool TimerManager::hasTimer() {
+    RWMutexType::ReadLock lock(m_mutex);
+    return !m_timers.empty();
+}
+
 void TimerManager::addTimer(Timer::ptr val, RWMutexType::WriteLock& lock) {
     //这句话的意思是将 val 插入到 m_timers 中，插入完后，
     //因为这时是属于一个整体，即 m_timers，而 it 是要获取
@@ -219,9 +225,4 @@ bool TimerManager::detectClockRollover(uint64_t now_ms) {
     }
     m_previouseTime = now_ms;
     return rollover;
-}
-
-bool TimerManager::hasTimer() {
-    RWMutexType::ReadLock lock(m_mutex);
-    return !m_timers.empty();
 }

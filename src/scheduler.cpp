@@ -1,5 +1,7 @@
 #include <assert.h>
+
 #include "scheduler.h"
+#include "util.h"
 
 // 当前线程的调度器，同一个调度器下的所有线程共享同一个实例
 static thread_local Scheduler *t_scheduler = nullptr;
@@ -14,20 +16,18 @@ Scheduler::Scheduler(size_t threads, bool use_caller, const std::string &name) {
 
     if (use_caller) {
         --threads;
-        // 主线程的调度器，caller线程的主协程,用 GetThis()获取
+        //因为是首次创建，所以这里是创建主协程，直接调用GetThis() 
+        //会创建。
         Fiber::GetThis();
         assert(GetThis() == nullptr);
         t_scheduler = this;
 
-        //caller线程的主协程不会被线程的调度协程run进行调度，而且，线程的调度协程停
-        //止时，应该返回caller线程的主协程在user caller情况下，把caller线程的主协
-        //程暂时保存起来，等调度协程结束时，再resume caller协程
-        // 获取调度协程
+        //main 线程的调度协程，调度协程没有栈空间和run_in_schedule 为 false
         m_rootFiber.reset(new Fiber(std::bind(&Scheduler::run, this), 0, false));
 
         Thread::SetName(m_name);
         t_scheduler_fiber = m_rootFiber.get();
-        m_rootThread      = Thread::GetThreadId();
+        m_rootThread      = GetThreadId();
         // 将线程 id 加入到线程池。
         m_threadIds.push_back(m_rootThread);
     } 
@@ -98,20 +98,20 @@ void Scheduler::idle() {
 void Scheduler::stop() {
     LOG_DEBUG("Scheduler::stop...");
     if (stopping()) {
-        // 已经停止了
-        return;
+        // 满足停止条件
+        return ;
     }
-    m_stopping = true;// 标记停止状态
+    // 标记停止状态
+    m_stopping = true;
 
+    // 如果use caller，那只能由caller线程发起stop
     if (m_useCaller) {
-        // 判断调用 stop 的线程是否为当前调度器的线程。
-        // 即使用了 caller 线程作为调度器，只能由 caller 线程发起 stop。
+        // this表示当前调用stop()的线程，GetThis()表示获取
+        // 创建该调度器的线程，即 main。判断是否相等。
         assert(GetThis() == this);
-    } else {
-        // 如果 m_useCaller 为 false 时，下面这句是什么意思？
-        // 因为 m_useCaller 为 false 时，调度器的主协程是由线程的调度协程创建的，
-        // 所以主线程应该为各自线程，而 stop 应该由主线程发起，GetThis() 是获取
-        // 调度器线程的，在 main 中，所以这里的主线程不应该是 main 线程。
+    } 
+    else {
+        //只有当所有的调度线程都结束后，调度器才算真正停止
         assert(GetThis() != this);
     }
 
@@ -147,9 +147,10 @@ void Scheduler::run() {
     LOG_DEBUG("Scheduler::run begin");
     //运行到本调度器，设置当前线程的调度器。
     setThis();
-    if (Thread::GetThreadId() != m_rootThread) {
-        // 非主线程的调度器，将当前线程的调度协程保存起来,
-        // 以便在stop时，返回caller线程的主协程
+    if (GetThreadId() != m_rootThread) {
+        //这里相当于初始化t_scheduler_fiber，除了 main 线程的，
+        //其它的都要初始化，main 的已经在构造的时候已经初始化完成，
+        //其它的在这里才初始化
         t_scheduler_fiber = Fiber::GetThis().get();
     }
 
@@ -159,17 +160,16 @@ void Scheduler::run() {
     ScheduleTask task;
     while (true) {
         task.reset();
-        // 作用：通知其他线程进行任务调度
-        bool tickle_me = false; // 是否tickle其他线程进行任务调度
+        bool tickle_me = false;
         {
             MutexType::Lock lock(m_mutex);
             auto it = m_tasks.begin();
             // 遍历所有调度任务
             while (it != m_tasks.end()) {
-                if (it->thread != -1 && it->thread != Thread::GetThreadId()) {
+                if (it->thread != -1 && it->thread != GetThreadId()) {
                     // 任务队列中的任务指定了调度线程，但不是当前线程，跳过这个任务，继续下一个,因为在初始化时
                     // 会指定哪个线程调度，如果 it->thread == -1，说明这个任务没有指定线程。这时也要通知其他
-                    // 线程进行调度，直到那个线程来了与 GetThreadId() 相等。所以这里不跳过这个任务，而是继续下一个。
+                    // 线程进行调度，直到那个线程来了与 GetThreadId() 相等。
                     ++it;
                     tickle_me = true;
                     continue;
@@ -178,7 +178,8 @@ void Scheduler::run() {
                 // 找到一个未指定线程，或是指定了当前线程的任务
                 assert(it->fiber || it->cb);
                 if (it->fiber) {
-                    // 如果是协程，则进去判断是否为 ready 状态。
+                    // 任务队列时的协程一定是READY状态，谁会把
+                    // RUNNING或TERM状态的协程加入调度呢？
                     assert(it->fiber->getState() == Fiber::READY);
                 }
                 // 当前调度线程找到一个任务，准备开始调度，将其从任务队列中剔除，活动线程数加1
@@ -188,12 +189,8 @@ void Scheduler::run() {
                 break;
             }
             // 当前线程拿完一个任务后，发现任务队列还有剩余，那么tickle一下其他线程
-            // 这里的逻辑是，如果任务队列中还有任务，那么说明有其他线程正在等待，需要通知其他线程进行调度，
-            // 否则，说明当前线程已经拿完了所有任务，可以退出循环，等待其他线程的调度,不管 tickle_me 是否
-            // 为 true，只要任务队列中还有任务（即it != m_tasks.end() == true），那么 ticlke_me 就为 true。
             tickle_me |= (it != m_tasks.end());
         }
-        // tickle_me 为 true，就通知其它线程。
         if (tickle_me) {
             tickle();
         }
@@ -209,12 +206,12 @@ void Scheduler::run() {
         else if (task.cb) {
             // task 为回调函数，则创建新的协程，执行回调函数
             if (cb_fiber) {
-                // 如果cb_fiber已经有协程了，说明上一个任务的回调函数还没执行完，则重新设置这个
-                // 协程的回调函数。只需将这个任务的相关信息设置到这个协程上即可。
+                // 因为任务 task 是以函数的形式传过来的，所以要创建成协程来执行，
+                // 又cb_fiber这个临时协程已经创建过了，所以复用一下这个协程。
                 cb_fiber->reset(task.cb);
             } 
             else {
-                // 如果协程没有被创建，则创建新的协程，并设置回调函数
+                // 临时协程没有被创建过，那就创建它。
                 cb_fiber.reset(new Fiber(task.cb));
             }
             task.reset();
